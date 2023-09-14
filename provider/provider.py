@@ -5,11 +5,16 @@ import requests
 import json
 import time
 import docker
+import HFRequests
 import math
 
 user_id = sys.argv[1]
 controller_ip = "10.8.1.46"
 controller_port = "8000"
+
+channelName = "mychannel"
+chaincodeName = "monitoring"
+token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE2OTQxMjk2MzcsInVzZXJuYW1lIjoiY29udHJvbGxlciIsIm9yZ05hbWUiOiJPcmcxIiwiaWF0IjoxNjk0MDkzNjM3fQ.DNJZ4kB11PbDB4UO2HaMjwlqxgTbJ8b7JK3WsRzaePY"
 
 client = docker.from_env()
 container_name = ""
@@ -62,6 +67,22 @@ def delete_container_and_image(body):
 
     client.images.remove(body)
 
+def HF_set_time(job_code, t_time):
+    global token
+    response = HFRequests.invoke_set_time(token, channelName, chaincodeName, 'org2', job_code, t_time)
+    if 'jwt expired' in response.text or 'jwt malformed' in response.text or 'User was not found' in response.text or 'UnauthorizedError' in response.text:
+        token = HFRequests.register_user(user_id, 'Org2')
+        response = HFRequests.invoke_set_time(token, channelName, chaincodeName, 'org2', job_code, t_time)
+    return response
+
+def HF_invoke_balance_transfer(receiver, sender):
+    global token
+    response = HFRequests.invoke_balance_transfer(receiver, sender, token, channelName, chaincodeName, 'org2')
+    if 'jwt expired' in response.text or 'jwt malformed' in response.text or 'User was not found' in response.text or 'UnauthorizedError' in response.text:
+        token = HFRequests.register_user(user_id, 'Org2')
+        response = HFRequests.invoke_balance_transfer(receiver, sender, token, channelName, chaincodeName, 'org2')
+    return response
+
 def on_request(json_data) :
     requests.get(url=ACK_URL + str(json_data['job_id']))
     requests.get(url=NOT_READY_URL + user_id)
@@ -69,6 +90,8 @@ def on_request(json_data) :
     r, pull_time, run_time = run_docker(json_data['task_link'])
     total_time = math.ceil(((pull_time + run_time)/100.0))*100
     print(pull_time, run_time, total_time)
+    HF_set_time(str(json_data['job_id']), total_time)
+    HF_invoke_balance_transfer(str(json_data['provider_id']), str(json_data['task_developer']))
     delete_container_and_image(json_data['task_link'])
     return {'Result': r, 'pull_time': pull_time, 'run_time': run_time, 'total_time': total_time}
 

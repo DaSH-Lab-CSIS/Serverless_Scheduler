@@ -6,7 +6,8 @@ from datetime import datetime, timedelta
 from pytz import timezone
 from scheduler.settings import TIME_ZONE
 from random import randint 
-import zmq 
+from scheduler.settings import USE_FABRIC
+import fabric.views as fabric
 import json
 
 # Create your views here.
@@ -20,6 +21,15 @@ def request_handler(request,service,start_time,run_async = False):
     
     job = Job.objects.create(provider = provider, start_time = start_time)
     job.save()
+
+    if USE_FABRIC:
+        r = fabric.invoke_new_job(str(job.id), str(service.id), str(service.developer_id),
+                                        str(provider.id), provider_org="Org1")
+        if 'jwt expired' in r.text or 'jwt malformed' in r.text or 'User was not found' in r.text:
+            token = fabric.register_user()
+            r = fabric.invoke_new_job(str(job.id), str(service.id), str(service.developer_id),
+                                        str(provider.id), provider_org="Org1",token=token)
+
     task_link = service.docker_container 
     task_developer = service.developer
     response = publish_to_topic(provider,task_link,task_developer, job.id)
@@ -35,11 +45,11 @@ def request_handler(request,service,start_time,run_async = False):
     job.finished = True
     job.save()
     providing_time = int(((job.ack_time - job.start_time)/timedelta(microseconds=1))/1000) # Providing time in milliseconds
-    # if USE_FABRIC:
-    #     r = fabric.invoke_received_result(str(job.id))
-    #     if 'jwt expired' in r.text or 'jwt malformed' in r.text or 'User was not found' in r.text:
-    #         token = fabric.register_user()
-    #         r = fabric.invoke_received_result(str(job.id))
+    if USE_FABRIC:
+        r = fabric.invoke_received_result(str(job.id))
+        if 'jwt expired' in r.text or 'jwt malformed' in r.text or 'User was not found' in r.text:
+            token = fabric.register_user()
+            r = fabric.invoke_received_result(str(job.id), token=token)
     return response, provider.id, providing_time, str(job.id)
     #handle response
     
